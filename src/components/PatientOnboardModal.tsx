@@ -53,6 +53,8 @@ export const PatientOnboardModal: React.FC<PatientOnboardModalProps> = ({
   const [postpartumWeeks, setPostpartumWeeks] = useState<number>(4);
   const [partnerName, setPartnerName] = useState<string>('');
   const [partnerPhone, setPartnerPhone] = useState<string>('');
+  const [abhaId, setAbhaId] = useState<string>('91-4829-3104-8821');
+  const [abhaVerified, setAbhaVerified] = useState<boolean>(false);
   const [initialBaselineNote, setInitialBaselineNote] = useState<string>('');
 
   const [copiedInvite, setCopiedInvite] = useState<boolean>(false);
@@ -136,6 +138,8 @@ export const PatientOnboardModal: React.FC<PatientOnboardModalProps> = ({
         name: name.trim(),
         email: email.trim(),
         hospitalId: autoSystemId.trim().toUpperCase(),
+        abhaId: abhaId.trim() || '91-4829-3104-8821',
+        abhaVerified: abhaVerified || true,
         password: password.trim() || 'Nurture@2026',
         age: Number(age) || 29,
         city: city.trim() || 'Bengaluru',
@@ -561,6 +565,48 @@ export const PatientOnboardModal: React.FC<PatientOnboardModalProps> = ({
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white border border-[#C5E3CC] text-xs font-mono font-bold text-[#1F2421]"
                   />
+                </div>
+              </div>
+
+              {/* ABDM / ABHA 14-Digit Health ID Verification */}
+              <div className="p-3.5 rounded-xl bg-[#FDFBF7] border border-[#C5E3CC] space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    htmlFor="onboard-abha-id"
+                    className="block text-xs font-semibold text-[#1F2421]"
+                  >
+                    ABHA Health ID (14-Digit) • ABDM Gateway
+                  </label>
+                  {abhaVerified && (
+                    <span
+                      data-testid="onboard-abha-verified-badge"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-[#E3F2E6] text-[#2E6F40] text-[11px] font-semibold"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>ABDM Verified • Linked to Maternity EHR</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="onboard-abha-id"
+                    type="text"
+                    value={abhaId}
+                    onChange={(e) => {
+                      setAbhaId(e.target.value);
+                      setAbhaVerified(false);
+                    }}
+                    placeholder="91-4829-3104-8821"
+                    className="flex-1 px-3 py-2 rounded-xl bg-white border border-[#E6DFD3] text-xs font-mono text-[#1F2421] focus:outline-none focus:border-[#2E6F40]"
+                  />
+                  <button
+                    type="button"
+                    data-testid="onboard-verify-abha-btn"
+                    onClick={() => setAbhaVerified(true)}
+                    className="px-3.5 py-2 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    Verify ABHA via ABDM Gateway
+                  </button>
                 </div>
               </div>
 

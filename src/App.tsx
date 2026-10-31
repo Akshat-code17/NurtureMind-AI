@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { translations, type LanguageCode, stopSpeaking } from './i18n/translations';
 import { NurtureMindDBProvider, useNurtureMindDB } from './context/NurtureMindDB';
@@ -13,19 +13,17 @@ import { GatewayLogin } from './components/GatewayLogin';
 import { MotherPortal } from './components/MotherPortal';
 import { DoctorPortal } from './components/DoctorPortal';
 import { CloudSettingsModal } from './components/CloudSettingsModal';
+import { WhatsAppBotWidget } from './components/WhatsAppBotWidget';
 
 export type ActivePortal = 'gateway' | 'mother' | 'doctor';
 
 function NurtureMindAppContent() {
-  const [lang, setLang] = useState<LanguageCode>('en');
-  const [activeNav, setActiveNav] = useState<NavSection>('gateway');
-  const [activePortal, setActivePortal] = useState<ActivePortal>('gateway');
-  const [gatewayResetKey, setGatewayResetKey] = useState<number>(0);
-  const [cloudModalOpen, setCloudModalOpen] = useState<boolean>(false);
-
   const {
     doctors,
     mothers,
+    communityPosts,
+    peerMessages,
+    sessionAuth,
     currentDoctor,
     currentMother,
     selectedMotherId,
@@ -41,19 +39,75 @@ function NurtureMindAppContent() {
     onboardPatientByDoctor,
     logoutSession,
     addActivityLog,
+    saveVoiceCareLog,
+    recordWatchFeedAction,
+    recordWatchMoodAction,
+    triggerWatchSosPartnerNudge,
+    pushDoctorWatchPrescription,
+    acknowledgeWatchPrescription,
+    createCommunityPost,
+    likeCommunityPost,
+    sendPeerDirectMessage,
+    notifyAssignedDoctorFromGuardian,
     updateConsent,
     saveEpdsScore,
     triggerPartnerNudge,
     requestCoordinatorCall,
     sendEpdsToMother,
     assignCounsellorAndLogNote,
+    verifyMotherAbhaId,
+    pushFhirRiskSummaryToHospitalEhr,
+    processWhatsAppBotVoiceOrText,
   } = useNurtureMindDB();
+
+  const [lang, setLang] = useState<LanguageCode>('en');
+  const [activeNav, setActiveNav] = useState<NavSection>('gateway');
+  const [activePortal, setActivePortal] = useState<ActivePortal>(() => {
+    if (sessionAuth?.role === 'doctor') return 'doctor';
+    if (sessionAuth?.role === 'mother') return 'mother';
+    return 'gateway';
+  });
+  const [gatewayResetKey, setGatewayResetKey] = useState<number>(0);
+  const [cloudModalOpen, setCloudModalOpen] = useState<boolean>(false);
+  const [whatsAppBotOpen, setWhatsAppBotOpen] = useState<boolean>(false);
+  const [isFloatingWatchOpen, setIsFloatingWatchOpen] = useState<boolean>(false);
+
+  const handleOpenWhatsAppBot = () => {
+    setIsFloatingWatchOpen(false);
+    setWhatsAppBotOpen(true);
+  };
+
+  const handleSetFloatingWatchOpen = (open: boolean) => {
+    if (open) {
+      setWhatsAppBotOpen(false);
+    }
+    setIsFloatingWatchOpen(open);
+  };
+
+  // Sync activePortal with persistent sessionAuth across refreshes or multi-tab sync
+  useEffect(() => {
+    if (sessionAuth?.role === 'doctor') {
+      setActivePortal('doctor');
+    } else if (sessionAuth?.role === 'mother') {
+      setActivePortal('mother');
+    }
+  }, [sessionAuth]);
 
   const t = translations[lang];
 
   const handleLanguageChange = (nextLang: LanguageCode) => {
     stopSpeaking();
     setLang(nextLang);
+  };
+
+  const handleExplicitLogout = () => {
+    stopSpeaking();
+    logoutSession();
+    setIsFloatingWatchOpen(false);
+    setWhatsAppBotOpen(false);
+    setActivePortal('gateway');
+    setActiveNav('gateway');
+    setGatewayResetKey((prev) => prev + 1);
   };
 
   return (
@@ -65,13 +119,12 @@ function NurtureMindAppContent() {
         activeNav={activeNav}
         setActiveNav={setActiveNav}
         t={t}
+        sessionAuth={sessionAuth}
         onOpenCloudSettings={() => setCloudModalOpen(true)}
-        onReturnToGateway={() => {
-          stopSpeaking();
-          logoutSession();
-          setActivePortal('gateway');
-          setGatewayResetKey((prev) => prev + 1);
+        onReturnToDashboard={() => {
+          setActiveNav('gateway');
         }}
+        onExplicitLogout={handleExplicitLogout}
       />
 
       {/* Persistent Subtle Clinical Safety Framing Banner */}
@@ -88,6 +141,11 @@ function NurtureMindAppContent() {
           <InfoModals
             activeNav={activeNav}
             onClose={() => setActiveNav('gateway')}
+            sessionAuth={sessionAuth}
+            currentMother={currentMother}
+            currentDoctor={currentDoctor}
+            doctors={doctors}
+            onRequestCoordinatorCall={requestCoordinatorCall}
             t={t}
           />
         ) : (
@@ -126,17 +184,29 @@ function NurtureMindAppContent() {
               <MotherPortal
                 mother={currentMother}
                 allMothers={mothers}
+                doctors={doctors}
+                communityPosts={communityPosts}
+                peerMessages={peerMessages}
                 onSelectMother={setSelectedMotherId}
                 onAddLog={addActivityLog}
+                onSaveVoiceLog={saveVoiceCareLog}
+                onWatchFeedResponse={recordWatchFeedAction}
+                onWatchMoodResponse={recordWatchMoodAction}
+                onTriggerWatchSosPartnerNudge={triggerWatchSosPartnerNudge}
+                onAcknowledgeWatchPrescription={acknowledgeWatchPrescription}
+                onCreateCommunityPost={createCommunityPost}
+                onLikeCommunityPost={likeCommunityPost}
+                onSendPeerMessage={sendPeerDirectMessage}
+                onNotifyAssignedDoctorFromGuardian={notifyAssignedDoctorFromGuardian}
                 onUpdateConsent={updateConsent}
                 onSaveEpdsScore={saveEpdsScore}
                 onTriggerPartnerNudge={triggerPartnerNudge}
                 onRequestCoordinatorCall={requestCoordinatorCall}
-                onLogout={() => {
-                  stopSpeaking();
-                  logoutSession();
-                  setActivePortal('gateway');
-                }}
+                onVerifyAbhaId={verifyMotherAbhaId}
+                onOpenWhatsAppBot={handleOpenWhatsAppBot}
+                isFloatingWatchOpenExternal={isFloatingWatchOpen}
+                onSetFloatingWatchOpenExternal={handleSetFloatingWatchOpen}
+                onLogout={handleExplicitLogout}
                 lang={lang}
                 t={t}
               />
@@ -158,11 +228,11 @@ function NurtureMindAppContent() {
                 onTriggerPartnerNudge={triggerPartnerNudge}
                 onSendEpdsToMother={sendEpdsToMother}
                 onAssignCounsellorAndLogNote={assignCounsellorAndLogNote}
-                onLogout={() => {
-                  stopSpeaking();
-                  logoutSession();
-                  setActivePortal('gateway');
-                }}
+                onPushWatchPrescription={pushDoctorWatchPrescription}
+                onVerifyAbhaId={verifyMotherAbhaId}
+                onPushFhirEhr={pushFhirRiskSummaryToHospitalEhr}
+                onOpenWhatsAppBot={handleOpenWhatsAppBot}
+                onLogout={handleExplicitLogout}
                 lang={lang}
                 t={t}
               />
@@ -170,6 +240,22 @@ function NurtureMindAppContent() {
           </>
         )}
       </main>
+
+      {/* Live 2-Way WhatsApp Cloud Bot & Bhashini Voice Note Simulator + Unified Floating Dock */}
+      <WhatsAppBotWidget
+        mother={currentMother}
+        doctors={doctors}
+        lang={lang}
+        onProcessVoiceOrText={processWhatsAppBotVoiceOrText}
+        onTriggerPartnerNudge={triggerPartnerNudge}
+        onRequestDoctorCallback={requestCoordinatorCall}
+        isOpenExternal={whatsAppBotOpen}
+        onOpenExternal={handleOpenWhatsAppBot}
+        onCloseExternal={() => setWhatsAppBotOpen(false)}
+        showWatchLauncher={activeNav === 'gateway' && activePortal === 'mother'}
+        isWatchOpen={isFloatingWatchOpen}
+        onOpenWatch={() => handleSetFloatingWatchOpen(true)}
+      />
 
       {/* Cloud Database Settings (Supabase / Built-in Cloud Run Live Sync) Modal */}
       <CloudSettingsModal
@@ -192,3 +278,4 @@ export default function App() {
     </NurtureMindDBProvider>
   );
 }
+

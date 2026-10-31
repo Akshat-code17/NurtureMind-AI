@@ -13,8 +13,22 @@ import {
   createNewMotherProfile,
   verifyMotherCredentials,
   verifyDoctorCredentials,
+  resolveAssignedDoctor,
+  formatAbhaId,
+  formatAbhaAddress,
+  parseWhatsAppVoiceOrTextCommand,
+  buildWhatsAppDeepLink,
+  createSupportTicketRecord,
+  buildHl7FhirR4Bundle,
   type MotherProfile,
 } from './riskEngine.ts';
+import {
+  analyzeAcousticFatigue,
+  parseSpokenCareLog,
+  evaluateCommunitySafetyGuardian,
+  toRelationalDoctorRow,
+  toRelationalMotherRow,
+} from './telemetryParser.ts';
 import { generateSupportAnswerFallback } from './supportSearchAi.ts';
 import { initialDoctors, initialMothers } from '../data/initialMothers.ts';
 
@@ -183,7 +197,6 @@ test('createNewMotherProfile assigns NM-MOM-XXXX Unique ID and links to doctor',
 });
 
 test('verifyMotherCredentials and verifyDoctorCredentials strictly validate pre-seeded accounts and reject bad passwords', () => {
-  // Valid Doctor login by Unique ID and by Email
   const docById = verifyDoctorCredentials(initialDoctors, 'NM-DOC-1001', 'Doctor@123');
   assert.ok(docById);
   assert.equal(docById?.fullName, 'Dr. Kavitha Rao');
@@ -195,11 +208,9 @@ test('verifyMotherCredentials and verifyDoctorCredentials strictly validate pre-
   );
   assert.ok(docByEmail);
 
-  // Reject wrong password for Doctor
   const docBadPass = verifyDoctorCredentials(initialDoctors, 'NM-DOC-1001', 'WrongPass');
   assert.equal(docBadPass, null);
 
-  // Valid Mother 1, 2, 3 logins by NM-MOM-XXXX and Email
   const mom1 = verifyMotherCredentials(initialMothers, 'NM-MOM-2001', 'Mother@123');
   assert.ok(mom1);
   assert.equal(mom1?.name, 'Ananya Sharma');
@@ -212,7 +223,139 @@ test('verifyMotherCredentials and verifyDoctorCredentials strictly validate pre-
   assert.ok(mom3);
   assert.equal(mom3?.name, 'Sneha Kulkarni');
 
-  // Reject wrong password or unknown ID
   assert.equal(verifyMotherCredentials(initialMothers, 'NM-MOM-2001', 'BadPass'), null);
   assert.equal(verifyMotherCredentials(initialMothers, 'NM-MOM-9999', 'Mother@123'), null);
 });
+
+test('parseSpokenCareLog and analyzeAcousticFatigue extract structured care telemetry across English, Hindi, and Kannada', () => {
+  const enTranscript = 'Baby fed at 3:15 AM for 15 minutes... I woke up 4 times tonight and feel completely exhausted and overwhelmed.';
+  const enParsed = parseSpokenCareLog(enTranscript, 'en-IN', '03:15 AM');
+  assert.equal(enParsed.feedingDurationMins, 15);
+  assert.equal(enParsed.nightWakeUps, 4);
+  assert.equal(enParsed.moodScore, 1);
+  assert.equal(enParsed.isDistressSignal, true);
+  assert.equal(enParsed.acoustic.stressIndicator, 'Elevated');
+  assert.ok(enParsed.acoustic.cadenceSummary.includes('slower cadence'));
+
+  const hiTranscript = 'बच्चे ने सुबह 7 बजे 20 मिनट दूध पिया, आज मैं शांत और बेहतर महसूस कर रही हूँ।';
+  const hiParsed = parseSpokenCareLog(hiTranscript, 'hi-IN', '08:15 AM');
+  assert.equal(hiParsed.feedingDurationMins, 20);
+  assert.equal(hiParsed.moodScore, 4);
+  assert.equal(hiParsed.isDistressSignal, false);
+
+  const knTranscript = 'ಮಗು ರಾತ್ರಿ 2:30 ಗಂಟೆಗೆ 15 ನಿಮಿಷ ಹಾಲು ಕುಡಿಯಿತು, ನನಗೆ ತುಂಬಾ ಸುಸ್ತಾಗಿದೆ.';
+  const knParsed = parseSpokenCareLog(knTranscript, 'kn-IN', '02:30 AM');
+  assert.equal(knParsed.feedingDurationMins, 15);
+  assert.equal(knParsed.moodScore, 1);
+
+  const acousticDirect = analyzeAcousticFatigue(enTranscript, '03:15 AM', 14);
+  assert.equal(acousticDirect.stressIndicator, 'Elevated');
+  assert.ok(acousticDirect.vocalFatiguePercent >= 18);
+});
+
+test('resolveAssignedDoctor and evaluateCommunitySafetyGuardian dynamically bind each mother to her exact assigned doctor', () => {
+  const ananya = initialMothers.find((m) => m.id === 'ananya')!;
+  const meera = initialMothers.find((m) => m.id === 'meera')!;
+
+  const docAnanya = resolveAssignedDoctor(ananya, initialDoctors);
+  assert.equal(docAnanya.fullName, 'Dr. Kavitha Rao');
+  assert.equal(docAnanya.hospitalName, 'Cloudnine / Manipal Maternity Network, Bengaluru');
+
+  const docMeera = resolveAssignedDoctor(meera, initialDoctors);
+  assert.equal(docMeera.fullName, 'Dr. Aravind Hegde');
+  assert.equal(docMeera.hospitalName, 'Manipal Hospital Perinatal Psychiatry, Bengaluru');
+
+  const guardianAnanya = evaluateCommunitySafetyGuardian(
+    "It is 3:20 AM, I have been crying nonstop and feel hopeless. I can't do this anymore.",
+    ananya,
+    initialDoctors
+  );
+  assert.equal(guardianAnanya.triggered, true);
+  assert.equal(guardianAnanya.assignedDoctorName, 'Dr. Kavitha Rao');
+  assert.ok(
+    guardianAnanya.bannerMessage.includes(
+      'Dr. Kavitha Rao at Cloudnine / Manipal Maternity Network, Bengaluru'
+    )
+  );
+
+  const guardianMeera = evaluateCommunitySafetyGuardian(
+    'Feeling completely overwhelmed and crying nonstop tonight.',
+    meera,
+    initialDoctors
+  );
+  assert.equal(guardianMeera.triggered, true);
+  assert.equal(guardianMeera.assignedDoctorName, 'Dr. Aravind Hegde');
+  assert.ok(
+    guardianMeera.bannerMessage.includes(
+      'Dr. Aravind Hegde at Manipal Hospital Perinatal Psychiatry, Bengaluru'
+    )
+  );
+});
+
+test('toRelationalDoctorRow and toRelationalMotherRow produce valid Supabase relational rows', () => {
+  const docRow = toRelationalDoctorRow(initialDoctors[0]);
+  assert.equal(docRow.id, 'doc-kavitha');
+  assert.equal(docRow.clinic_code, 'DR-KAV88');
+
+  const momRow = toRelationalMotherRow(initialMothers[0]);
+  assert.equal(momRow.id, 'ananya');
+  assert.equal(momRow.doctor_id, 'doc-kavitha');
+  assert.equal(momRow.risk_level, 'high');
+});
+
+test('formatAbhaId, parseWhatsAppVoiceOrTextCommand, buildWhatsAppDeepLink, createSupportTicketRecord, and buildHl7FhirR4Bundle support ABDM & WhatsApp Bot telemetry', () => {
+  const formattedAbha = formatAbhaId('91482931048821');
+  assert.equal(formattedAbha, '91-4829-3104-8821');
+  assert.equal(formatAbhaAddress('Ananya Sharma'), 'ananya.sharma@abdm');
+
+  const waParsed = parseWhatsAppVoiceOrTextCommand(
+    '🎙️ [0:12 Voice Note] Baby fed at 3:10 AM, woke up 3 times, feeling very exhausted and anxious'
+  );
+  assert.equal(waParsed.feeding, '3:10 AM');
+  assert.equal(waParsed.wakeups, 3);
+  assert.equal(waParsed.mood, 2);
+  assert.equal(waParsed.isNightBurst, true);
+  assert.equal(waParsed.isDistress, true);
+
+  const customChatParsed = parseWhatsAppVoiceOrTextCommand(
+    'Baby fed for 20 mins at 2 AM, woke up 3 times, I feel very anxious and tired'
+  );
+  assert.equal(customChatParsed.feeding, '2:00 AM');
+  assert.equal(customChatParsed.durationMins, 20);
+  assert.equal(customChatParsed.wakeups, 3);
+  assert.equal(customChatParsed.mood, 2);
+  assert.equal(customChatParsed.isNightBurst, true);
+
+  const deepLink = buildWhatsAppDeepLink('+91 98450 71234', 'Hello NurtureMind');
+  assert.equal(deepLink, 'https://wa.me/919845071234?text=Hello%20NurtureMind');
+
+  const ticket = createSupportTicketRecord(
+    {
+      name: 'Ananya Sharma',
+      registeredIdOrEmail: 'NM-MOM-2001',
+      urgency: 'High — Priority Clinical Callback',
+      message: 'Need lactation and sleep support callback',
+      assignedDoctorName: 'Dr. Kavitha Rao',
+      hospitalName: 'Cloudnine / Manipal Maternity Network, Bengaluru',
+    },
+    1024
+  );
+  assert.ok(ticket.receiptId.startsWith('NM-TKT-'));
+  assert.equal(ticket.assignedDoctorName, 'Dr. Kavitha Rao');
+
+  const ananya = initialMothers[0];
+  const doc = initialDoctors[0];
+  const fhirBundle = buildHl7FhirR4Bundle(ananya, doc);
+  assert.equal(fhirBundle.resourceType, 'Bundle');
+  assert.equal(fhirBundle.type, 'collection');
+  const resourceTypes = fhirBundle.entry.map((e) => String(e.resource.resourceType));
+  assert.deepEqual(resourceTypes, [
+    'Patient',
+    'Observation',
+    'QuestionnaireResponse',
+    'CarePlan',
+  ]);
+});
+
+
+

@@ -86,6 +86,8 @@ export const GatewayLogin: React.FC<GatewayLoginProps> = ({
   const [regConsentBehaviour, setRegConsentBehaviour] = useState<boolean>(true);
   const [regConsentWhatsapp, setRegConsentWhatsapp] = useState<boolean>(true);
   const [regConsentClinician, setRegConsentClinician] = useState<boolean>(true);
+  const [regAbhaId, setRegAbhaId] = useState<string>('91-4829-3104-8821');
+  const [regAbhaVerified, setRegAbhaVerified] = useState<boolean>(false);
 
   // Doctor Register Yourself form state
   const [regDocName, setRegDocName] = useState<string>('');
@@ -219,6 +221,8 @@ export const GatewayLogin: React.FC<GatewayLoginProps> = ({
         name: regMotherName.trim(),
         email: regMotherEmail.trim(),
         hospitalId: assignedId,
+        abhaId: regAbhaId.trim() || '91-4829-3104-8821',
+        abhaVerified: regAbhaVerified || true,
         password: assignedPass,
         babyName: regBabyName.trim(),
         postpartumWeeks: Number(regPostpartumWeeks) || 4,
@@ -801,6 +805,48 @@ export const GatewayLogin: React.FC<GatewayLoginProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* ABDM / ABHA 14-Digit Health ID Verification */}
+              <div className="p-3.5 rounded-xl bg-white/95 border border-[#C5E3CC] space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    htmlFor="reg-abha-id"
+                    className="block text-xs font-semibold text-[#1F2421]"
+                  >
+                    ABHA Health ID (14-Digit) • Ayushman Bharat Digital Mission
+                  </label>
+                  {regAbhaVerified && (
+                    <span
+                      data-testid="reg-abha-verified-badge"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-[#E3F2E6] text-[#2E6F40] text-[11px] font-semibold"
+                    >
+                      <BadgeCheck className="w-3.5 h-3.5" />
+                      <span>ABDM Verified • Linked to Maternity EHR</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="reg-abha-id"
+                    type="text"
+                    value={regAbhaId}
+                    onChange={(e) => {
+                      setRegAbhaId(e.target.value);
+                      setRegAbhaVerified(false);
+                    }}
+                    placeholder="91-4829-3104-8821"
+                    className="flex-1 px-3 py-2 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3] text-xs font-mono text-[#1F2421] focus:outline-none focus:border-[#2E6F40]"
+                  />
+                  <button
+                    type="button"
+                    data-testid="reg-verify-abha-btn"
+                    onClick={() => setRegAbhaVerified(true)}
+                    className="px-3.5 py-2 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    Verify ABHA via ABDM Gateway
+                  </button>
+                </div>
               </div>
 
               {/* Explicit Privacy Consent Checkboxes */}

@@ -15,14 +15,22 @@ import {
   Sparkles,
   CheckCircle2,
   Clock,
+  Users,
+  Watch,
+  Stethoscope,
 } from 'lucide-react';
 import {
   type MotherProfile,
+  type DoctorProfile,
   type ConsentSettings,
+  type CommunityPost,
+  type PeerDirectMessage,
   evaluateSearchDistress,
   isLateNightTimestamp,
   calculateEpdsEvaluation,
+  resolveAssignedDoctor,
 } from '../utils/riskEngine';
+import { type ParsedVoiceCareLog } from '../utils/telemetryParser';
 import {
   type LanguageCode,
   type TranslationDictionary,
@@ -34,45 +42,111 @@ import {
   generateSupportAnswerFallback,
 } from '../utils/supportSearchAi';
 import { WhatsappPreviewModal } from './WhatsappPreviewModal';
+import { VoiceLoggerCard } from './VoiceLoggerCard';
+import { AppleWatchSimulator } from './AppleWatchSimulator';
+import { MomCircleCommunity } from './MomCircleCommunity';
 
 interface MotherPortalProps {
   mother: MotherProfile;
   allMothers: MotherProfile[];
+  doctors: DoctorProfile[];
+  communityPosts: CommunityPost[];
+  peerMessages: PeerDirectMessage[];
   onSelectMother: (id: string) => void;
   onAddLog: (
     motherId: string,
     log: {
       timestamp: string;
-      category: 'Feeding' | 'Sleep & Night Wake-up' | 'In-App Search' | 'Mood Check-In';
+      category:
+        | 'Feeding'
+        | 'Sleep & Night Wake-up'
+        | 'In-App Search'
+        | 'Mood Check-In'
+        | 'Voice Logger'
+        | 'Apple Watch';
       detail: string;
       isNightBurst: boolean;
       isDistressSignal: boolean;
       baselineComparison: string;
     }
   ) => void;
+  onSaveVoiceLog: (motherId: string, parsed: ParsedVoiceCareLog) => void;
+  onWatchFeedResponse: (motherId: string, response: 'fed' | 'snooze') => void;
+  onWatchMoodResponse: (
+    motherId: string,
+    mood: 'Calm' | 'Exhausted' | 'Overwhelmed'
+  ) => void;
+  onTriggerWatchSosPartnerNudge: (motherId: string) => void;
+  onAcknowledgeWatchPrescription: (motherId: string, prescriptionId: string) => void;
+  onCreateCommunityPost: (
+    channel: CommunityPost['channel'],
+    content: string,
+    isAnonymous: boolean
+  ) => void;
+  onLikeCommunityPost: (postId: string) => void;
+  onSendPeerMessage: (toPeerName: string, text: string) => void;
+  onNotifyAssignedDoctorFromGuardian: (
+    motherId: string,
+    assignedDoctor: DoctorProfile,
+    postText: string
+  ) => void;
   onUpdateConsent: (motherId: string, consent: ConsentSettings) => void;
   onSaveEpdsScore: (motherId: string, score: number, routeToDoctor: boolean) => void;
   onTriggerPartnerNudge: (motherId: string) => void;
   onRequestCoordinatorCall: (motherId: string) => void;
+  onVerifyAbhaId?: (motherId: string, abhaId: string) => void;
+  onOpenWhatsAppBot?: () => void;
+  isFloatingWatchOpenExternal?: boolean;
+  onSetFloatingWatchOpenExternal?: (open: boolean) => void;
   onLogout: () => void;
   lang: LanguageCode;
   t: TranslationDictionary;
 }
 
-export type MotherTab = 'tabA' | 'tabB' | 'tabC' | 'tabD';
+export type MotherTab = 'tabA' | 'tabB' | 'tabC' | 'tabD' | 'tabE' | 'tabF';
 
 export const MotherPortal: React.FC<MotherPortalProps> = ({
   mother,
+  doctors,
+  communityPosts,
+  peerMessages,
   onAddLog,
+  onSaveVoiceLog,
+  onWatchFeedResponse,
+  onWatchMoodResponse,
+  onTriggerWatchSosPartnerNudge,
+  onAcknowledgeWatchPrescription,
+  onCreateCommunityPost,
+  onLikeCommunityPost,
+  onSendPeerMessage,
+  onNotifyAssignedDoctorFromGuardian,
   onUpdateConsent,
   onSaveEpdsScore,
   onTriggerPartnerNudge,
   onRequestCoordinatorCall,
+  onVerifyAbhaId,
+  onOpenWhatsAppBot,
+  isFloatingWatchOpenExternal,
+  onSetFloatingWatchOpenExternal,
   onLogout,
   lang,
   t,
 }) => {
   const [activeTab, setActiveTab] = useState<MotherTab>('tabA');
+  const [isFloatingWatchOpenInternal, setIsFloatingWatchOpenInternal] =
+    useState<boolean>(false);
+  const isFloatingWatchOpen =
+    isFloatingWatchOpenExternal ?? isFloatingWatchOpenInternal;
+  const setIsFloatingWatchOpen = (next: boolean) => {
+    setIsFloatingWatchOpenInternal(next);
+    if (onSetFloatingWatchOpenExternal) {
+      onSetFloatingWatchOpenExternal(next);
+    }
+  };
+  const [abhaInput, setAbhaInput] = useState<string>(
+    mother.abhaId || '91-4829-3104-8821'
+  );
+  const assignedDoctor = resolveAssignedDoctor(mother, doctors);
 
   // Tab A Form States
   const [feedType, setFeedType] = useState<'Breastfeeding' | 'Bottle'>('Breastfeeding');
@@ -314,15 +388,56 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
                 +{mother.baselineDeviationPercent}% ({mother.riskScore}/100)
               </span>
               {' · '}Partner: {mother.partnerName}
-              {mother.email && ` · ${mother.email}`}
+              {' · '}Assigned Clinician:{' '}
+              <strong
+                data-testid="mother-assigned-doctor-badge"
+                className="text-[#2E6F40]"
+              >
+                {assignedDoctor.fullName} ({assignedDoctor.hospitalName})
+              </strong>
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                data-testid="mother-abha-verified-badge"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#E3F2E6] border border-[#C5E3CC] text-[11px] font-semibold text-[#2E6F40]"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>
+                  ABHA ID: {mother.abhaId || '91-4829-3104-8821'} (
+                  {mother.abhaAddress || 'ananya.sharma@abdm'}) • ABDM Verified • Linked to Maternity EHR
+                </span>
+              </span>
+              {onVerifyAbhaId && (
+                <div className="inline-flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    aria-label="ABHA Health ID (14-Digit)"
+                    value={abhaInput}
+                    onChange={(e) => setAbhaInput(e.target.value)}
+                    placeholder="91-4829-3104-8821"
+                    className="w-36 px-2.5 py-1 rounded-lg bg-[#FDFBF7] border border-[#E6DFD3] text-[11px] font-mono text-[#1F2421]"
+                  />
+                  <button
+                    type="button"
+                    data-testid="mother-verify-abha-btn"
+                    onClick={() => {
+                      onVerifyAbhaId(mother.id, abhaInput);
+                      showToast('ABDM Verified • Linked to Maternity EHR');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-[#2E6F40] hover:bg-[#245832] text-white text-[11px] font-semibold transition-colors"
+                  >
+                    Verify ABHA via ABDM Gateway
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2.5 shrink-0">
           <span
             data-testid="mother-confidential-id-badge"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3] text-xs font-mono font-bold text-[#2E6F40]"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3] text-xs font-mono font-bold text-[#2E6F40] whitespace-nowrap"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-[#2E6F40]" />
             ID: {mother.hospitalId}
@@ -360,18 +475,18 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
         </div>
       )}
 
-      {/* 4 Structured Sub-Tabs */}
+      {/* 6 Structured Sub-Tabs (Including MomCircle Community & Apple Watch Simulator) */}
       <div
         role="tablist"
         aria-label="Mother Workspace Tabs"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 p-1.5 bg-[#F7F2EB] border border-[#E6DFD3] rounded-2xl"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 p-1.5 bg-[#F7F2EB] border border-[#E6DFD3] rounded-2xl"
       >
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'tabA'}
           onClick={() => setActiveTab('tabA')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all text-left flex items-center gap-2.5 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
             activeTab === 'tabA'
               ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
               : 'text-[#5A625D] hover:text-[#1F2421]'
@@ -386,7 +501,7 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
           role="tab"
           aria-selected={activeTab === 'tabB'}
           onClick={() => setActiveTab('tabB')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all text-left flex items-center gap-2.5 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
             activeTab === 'tabB'
               ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
               : 'text-[#5A625D] hover:text-[#1F2421]'
@@ -401,7 +516,7 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
           role="tab"
           aria-selected={activeTab === 'tabC'}
           onClick={() => setActiveTab('tabC')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all text-left flex items-center gap-2.5 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
             activeTab === 'tabC'
               ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
               : 'text-[#5A625D] hover:text-[#1F2421]'
@@ -416,7 +531,7 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
           role="tab"
           aria-selected={activeTab === 'tabD'}
           onClick={() => setActiveTab('tabD')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all text-left flex items-center gap-2.5 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
             activeTab === 'tabD'
               ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
               : 'text-[#5A625D] hover:text-[#1F2421]'
@@ -425,13 +540,51 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
           <ShieldCheck className="w-4 h-4 text-[#2E6F40] shrink-0" />
           <span className="truncate">{t.motherTabD}</span>
         </button>
+
+        <button
+          type="button"
+          role="tab"
+          data-testid="mother-tab-momcircle"
+          aria-selected={activeTab === 'tabE'}
+          onClick={() => setActiveTab('tabE')}
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
+            activeTab === 'tabE'
+              ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
+              : 'text-[#5A625D] hover:text-[#1F2421]'
+          }`}
+        >
+          <Users className="w-4 h-4 text-[#5B3E85] shrink-0" />
+          <span className="truncate">MomCircle Community</span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          data-testid="mother-tab-watch"
+          aria-selected={activeTab === 'tabF'}
+          onClick={() => setActiveTab('tabF')}
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all text-left flex items-center gap-2 ${
+            activeTab === 'tabF'
+              ? 'bg-white text-[#1F2421] shadow-xs border border-[#E6DFD3]'
+              : 'text-[#5A625D] hover:text-[#1F2421]'
+          }`}
+        >
+          <Watch className="w-4 h-4 text-[#2E6F40] shrink-0" />
+          <span className="truncate">Apple Watch & Wearables</span>
+        </button>
       </div>
 
       {/* ===================================================================
-          TAB A: DAILY BABY CARE & 10-SECOND CHECK-IN
+          TAB A: DAILY BABY CARE & 10-SECOND CHECK-IN + HANDS-FREE VOICE LOGGER
       =================================================================== */}
       {activeTab === 'tabA' && (
         <div className="space-y-6">
+          {/* Feature 4: Hands-Free Multilingual Voice Data Logger + Acoustic Fatigue Analyzer */}
+          <VoiceLoggerCard
+            mother={mother}
+            onSaveVoiceLog={(parsed) => onSaveVoiceLog(mother.id, parsed)}
+          />
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Card 1: Log Feeding */}
             <form
@@ -932,6 +1085,21 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
                     {t.signalRepeatedEdits}
                   </p>
                 </div>
+
+                {/* Bonus #1: Acoustic Voice Fatigue Attribution Bar in Explainable Signals */}
+                <div className="p-4 rounded-xl bg-white border border-[#F5D0D6]">
+                  <div className="flex items-center justify-between text-xs font-mono text-[#E11D48] mb-1">
+                    <span>Acoustic Voice Fatigue Telemetry</span>
+                    <span>
+                      {mother.acousticTelemetry?.wpm || 94} WPM ·{' '}
+                      {mother.acousticTelemetry?.vocalFatiguePercent || 74}% fatigue
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm font-semibold text-[#1F2421]">
+                    {mother.acousticTelemetry?.cadenceSummary ||
+                      'Elevated Vocal Fatigue: +18% slower cadence at 03:15 AM'}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1341,6 +1509,57 @@ export const MotherPortal: React.FC<MotherPortalProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ===================================================================
+          TAB E: AUTH-GATED MOMCIRCLE PEER COMMUNITY + DYNAMIC AI SAFETY GUARDIAN
+      =================================================================== */}
+      {activeTab === 'tabE' && (
+        <MomCircleCommunity
+          isAuthenticatedMother={true}
+          currentMother={mother}
+          doctors={doctors}
+          posts={communityPosts}
+          peerMessages={peerMessages}
+          onCreatePost={onCreateCommunityPost}
+          onLikePost={onLikeCommunityPost}
+          onSendPeerMessage={onSendPeerMessage}
+          onNotifyAssignedDoctorFromGuardian={onNotifyAssignedDoctorFromGuardian}
+          onOpenEpdsFromGuardian={() => setActiveTab('tabC')}
+        />
+      )}
+
+      {/* ===================================================================
+          TAB F: INTERACTIVE APPLE WATCH / SMARTWATCH SIMULATOR
+      =================================================================== */}
+      {activeTab === 'tabF' && (
+        <AppleWatchSimulator
+          mother={mother}
+          assignedDoctor={assignedDoctor}
+          mode="tab"
+          onWatchFeedResponse={(resp) => onWatchFeedResponse(mother.id, resp)}
+          onWatchMoodResponse={(mood) => onWatchMoodResponse(mother.id, mood)}
+          onTriggerSosPartnerNudge={() => onTriggerWatchSosPartnerNudge(mother.id)}
+          onAcknowledgePrescription={(rxId) =>
+            onAcknowledgeWatchPrescription(mother.id, rxId)
+          }
+        />
+      )}
+
+      {/* Floating Apple Watch Corner Widget (Launcher button lives in the unified bottom-right dock) */}
+      {isFloatingWatchOpen && (
+        <AppleWatchSimulator
+          mother={mother}
+          assignedDoctor={assignedDoctor}
+          mode="floating"
+          onWatchFeedResponse={(resp) => onWatchFeedResponse(mother.id, resp)}
+          onWatchMoodResponse={(mood) => onWatchMoodResponse(mother.id, mood)}
+          onTriggerSosPartnerNudge={() => onTriggerWatchSosPartnerNudge(mother.id)}
+          onAcknowledgePrescription={(rxId) =>
+            onAcknowledgeWatchPrescription(mother.id, rxId)
+          }
+          onCloseFloating={() => setIsFloatingWatchOpen(false)}
+        />
       )}
 
       {/* Partner WhatsApp Preview Modal */}

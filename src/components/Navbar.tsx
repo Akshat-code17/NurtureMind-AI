@@ -1,8 +1,9 @@
 import React from 'react';
-import { Globe, HeartHandshake, Cloud } from 'lucide-react';
+import { Globe, HeartHandshake, Cloud, ArrowLeft, LogOut, ShieldCheck } from 'lucide-react';
 import { type LanguageCode, type TranslationDictionary } from '../i18n/translations';
+import { type SessionAuth } from '../utils/riskEngine';
 
-export type NavSection = 'gateway' | 'about' | 'privacy';
+export type NavSection = 'gateway' | 'about' | 'privacy' | 'contact';
 
 interface NavbarProps {
   lang: LanguageCode;
@@ -10,7 +11,9 @@ interface NavbarProps {
   activeNav: NavSection;
   setActiveNav: (nav: NavSection) => void;
   t: TranslationDictionary;
-  onReturnToGateway: () => void;
+  sessionAuth?: SessionAuth | null;
+  onReturnToDashboard: () => void;
+  onExplicitLogout?: () => void;
   onOpenCloudSettings?: () => void;
 }
 
@@ -20,15 +23,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeNav,
   setActiveNav,
   t,
-  onReturnToGateway,
+  sessionAuth,
+  onReturnToDashboard,
+  onExplicitLogout,
   onOpenCloudSettings,
 }) => {
   const handleNavClick = (section: NavSection) => {
     if (section === 'gateway') {
-      onReturnToGateway();
+      onReturnToDashboard();
     }
     setActiveNav(section);
   };
+
+  const isLoggedIn = Boolean(sessionAuth && sessionAuth.role);
 
   return (
     <header className="sticky top-0 z-40 bg-[#FDFBF7]/95 backdrop-blur-md border-b border-[#E6DFD3]">
@@ -36,6 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Zone 1: Brand Wordmark + Subtitle */}
         <button
           type="button"
+          data-testid="nav-brand-home-btn"
           onClick={() => handleNavClick('gateway')}
           className="flex items-center gap-3 text-left group focus:outline-none"
         >
@@ -54,10 +62,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </button>
 
-        {/* Zone 2: Navigation Links (Home | About | Privacy & Ethics) */}
-        <nav aria-label="Main Navigation" className="hidden md:flex items-center gap-8">
+        {/* Zone 2: Navigation Links (Home | About & Architecture | Privacy & Ethics | Team Omnitrix) */}
+        <nav aria-label="Main Navigation" className="hidden md:flex items-center gap-6">
           <button
             type="button"
+            data-testid="nav-home-btn"
             onClick={() => handleNavClick('gateway')}
             className={`text-sm font-medium transition-colors whitespace-nowrap py-1 border-b-2 ${
               activeNav === 'gateway'
@@ -65,10 +74,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 : 'border-transparent text-[#5A625D] hover:text-[#1F2421]'
             }`}
           >
-            {t.navGateway}
+            {isLoggedIn ? 'My Dashboard' : t.navGateway}
           </button>
           <button
             type="button"
+            data-testid="nav-about-btn"
             onClick={() => handleNavClick('about')}
             className={`text-sm font-medium transition-colors whitespace-nowrap py-1 border-b-2 ${
               activeNav === 'about'
@@ -76,10 +86,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 : 'border-transparent text-[#5A625D] hover:text-[#1F2421]'
             }`}
           >
-            {t.navAbout}
+            {lang === 'en' ? 'About & Architecture' : t.navAbout}
           </button>
           <button
             type="button"
+            data-testid="nav-privacy-btn"
             onClick={() => handleNavClick('privacy')}
             className={`text-sm font-medium transition-colors whitespace-nowrap py-1 border-b-2 ${
               activeNav === 'privacy'
@@ -88,6 +99,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             {t.navPrivacy}
+          </button>
+          <button
+            type="button"
+            data-testid="nav-contact-btn"
+            onClick={() => handleNavClick('contact')}
+            className={`text-sm font-medium transition-colors whitespace-nowrap py-1 border-b-2 ${
+              activeNav === 'contact'
+                ? 'border-[#2E6F40] text-[#1F2421]'
+                : 'border-transparent text-[#5A625D] hover:text-[#1F2421]'
+            }`}
+          >
+            {lang === 'hi'
+              ? 'संपर्क और हेल्पलाइन'
+              : lang === 'kn'
+              ? 'ಸಂಪರ್ಕಿಸಿ (24/7)'
+              : 'Contact Us'}
           </button>
         </nav>
 
@@ -150,6 +177,46 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
+      {/* Persistent Logged-In Active Session Bar when viewing About / Privacy / Team */}
+      {isLoggedIn && sessionAuth && activeNav !== 'gateway' && (
+        <div
+          data-testid="persistent-session-bar"
+          className="bg-[#E3F2E6] border-t border-[#C5E3CC] px-4 sm:px-6 lg:px-8 py-2.5"
+        >
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-[#1F2421]">
+              <ShieldCheck className="w-4 h-4 text-[#2E6F40]" />
+              <span>
+                Active Session: <strong>{sessionAuth.name}</strong> (
+                {sessionAuth.systemId || sessionAuth.role.toUpperCase()})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="navbar-back-to-dashboard-btn"
+                onClick={() => handleNavClick('gateway')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold shadow-xs transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>← Back to My Active Dashboard</span>
+              </button>
+              {onExplicitLogout && (
+                <button
+                  type="button"
+                  data-testid="navbar-explicit-logout-btn"
+                  onClick={onExplicitLogout}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white hover:bg-[#FFF5F5] border border-[#E6DFD3] text-xs font-semibold text-[#1F2421] transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-[#E11D48]" />
+                  <span>Logout</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Secondary Navigation Strip */}
       <div className="flex md:hidden items-center justify-around border-t border-[#E6DFD3] bg-[#F7F2EB] px-2 py-1.5 text-xs font-medium">
         <button
@@ -159,7 +226,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             activeNav === 'gateway' ? 'text-[#2E6F40] font-semibold' : 'text-[#5A625D]'
           }`}
         >
-          {t.navGateway}
+          {isLoggedIn ? 'Dashboard' : t.navGateway}
         </button>
         <button
           type="button"
@@ -168,7 +235,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             activeNav === 'about' ? 'text-[#2E6F40] font-semibold' : 'text-[#5A625D]'
           }`}
         >
-          {t.navAbout}
+          About
         </button>
         <button
           type="button"
@@ -179,7 +246,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           {t.navPrivacy}
         </button>
+        <button
+          type="button"
+          data-testid="mobile-nav-contact-btn"
+          onClick={() => handleNavClick('contact')}
+          className={`px-2 py-1 rounded ${
+            activeNav === 'contact' ? 'text-[#2E6F40] font-semibold' : 'text-[#5A625D]'
+          }`}
+        >
+          Contact Us
+        </button>
       </div>
     </header>
   );
 };
+

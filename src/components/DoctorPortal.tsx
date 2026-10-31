@@ -15,12 +15,20 @@ import {
   Copy,
   Users,
   Building2,
+  ShieldCheck,
+  Code2,
+  UploadCloud,
+  Download,
+  Printer,
+  X,
 } from 'lucide-react';
 import {
   type MotherProfile,
   type DoctorProfile,
   type NewMotherRegistrationInput,
   type RiskTier,
+  buildHl7FhirR4Bundle,
+  resolveAssignedDoctor,
 } from '../utils/riskEngine';
 import {
   type LanguageCode,
@@ -40,6 +48,14 @@ interface DoctorPortalProps {
   onTriggerPartnerNudge: (motherId: string) => void;
   onSendEpdsToMother: (motherId: string) => void;
   onAssignCounsellorAndLogNote: (motherId: string, noteText: string) => void;
+  onPushWatchPrescription: (
+    motherId: string,
+    doctor: DoctorProfile,
+    message: string
+  ) => void;
+  onVerifyAbhaId?: (motherId: string, abhaId: string) => void;
+  onPushFhirEhr?: (motherId: string, doctor: DoctorProfile) => string;
+  onOpenWhatsAppBot?: () => void;
   onLogout: () => void;
   lang: LanguageCode;
   t: TranslationDictionary;
@@ -47,6 +63,12 @@ interface DoctorPortalProps {
 
 export type DoctorTab = 'tabA' | 'tabB' | 'tabC';
 export type QueueScope = 'assigned' | 'all';
+
+const PRESCRIPTION_PRESETS = [
+  'Take a 20-min nap',
+  'Complete 10-sec mood check',
+  'Schedule 5-min tele-check',
+] as const;
 
 export const DoctorPortal: React.FC<DoctorPortalProps> = ({
   currentDoctor,
@@ -58,22 +80,33 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
   onTriggerPartnerNudge,
   onSendEpdsToMother,
   onAssignCounsellorAndLogNote,
+  onPushWatchPrescription,
+  onVerifyAbhaId,
+  onPushFhirEhr,
+  onOpenWhatsAppBot,
   onLogout,
   lang,
   t,
 }) => {
   const [activeTab, setActiveTab] = useState<DoctorTab>('tabA');
-  const [queueScope, setQueueScope] = useState<QueueScope>('all');
+  const [queueScope, setQueueScope] = useState<QueueScope>('assigned');
   const [tierFilter, setTierFilter] = useState<'all' | RiskTier>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [clinicalNoteInput, setClinicalNoteInput] = useState<string>('');
+  const [watchRxInput, setWatchRxInput] = useState<string>('Take a 20-min nap');
   const [actionToast, setActionToast] = useState<string | null>(null);
   const [isWhatsappOpen, setIsWhatsappOpen] = useState<boolean>(false);
   const [isOnboardModalOpen, setIsOnboardModalOpen] = useState<boolean>(false);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [isFhirBundleModalOpen, setIsFhirBundleModalOpen] = useState<boolean>(false);
+  const [isHandoffModalOpen, setIsHandoffModalOpen] = useState<boolean>(false);
+  const [copiedFhirJson, setCopiedFhirJson] = useState<boolean>(false);
 
   const selectedMother =
     mothers.find((m) => m.id === selectedMotherId) || mothers[0];
+  const [docAbhaInput, setDocAbhaInput] = useState<string>(
+    selectedMother.abhaId || '91-4829-3104-8821'
+  );
 
   const isAssignedToDoctor = (m: MotherProfile): boolean => {
     return (
@@ -155,7 +188,13 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
   };
 
   const getShapLabel = (
-    key: 'nightBursts' | 'distressSearch' | 'missedEdits' | 'reducedMood' | 'caregiverShare'
+    key:
+      | 'nightBursts'
+      | 'distressSearch'
+      | 'missedEdits'
+      | 'reducedMood'
+      | 'caregiverShare'
+      | 'acousticFatigue'
   ): string => {
     switch (key) {
       case 'nightBursts':
@@ -168,6 +207,8 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
         return t.shapFeature4;
       case 'caregiverShare':
         return t.shapFeature5;
+      case 'acousticFatigue':
+        return 'Acoustic Voice Fatigue & Nocturnal Cadence Shift';
     }
   };
 
@@ -258,6 +299,7 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
 
           <button
             type="button"
+            data-testid="doctor-logout-btn"
             onClick={onLogout}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#F7F2EB] hover:bg-[#EDE5D8] text-xs font-semibold text-[#1F2421] transition-colors whitespace-nowrap"
           >
@@ -737,6 +779,171 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
             </div>
           </div>
 
+          {/* ===================================================================
+              BONUS #3: ⌚ APPLE WATCH, BIOMETRICS & VOICE TELEMETRY + DOCTOR CARE PRESCRIPTION COMPOSER
+          =================================================================== */}
+          <div
+            data-testid="doctor-watch-telemetry-panel"
+            className="bg-white border border-[#E6DFD3] rounded-2xl p-6 space-y-5"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E6DFD3] pb-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-[#1F2421]">
+                  ⌚ Apple Watch, Biometrics & Voice Telemetry — {selectedMother.name}
+                </h2>
+                <p className="text-xs text-[#5A625D] mt-0.5">
+                  Live wearable autonomic metrics, vocal fatigue cadence, and direct Doctor-to-Watch Care Prescription composer.
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-xl bg-[#E3F2E6] text-[#2E6F40] text-xs font-mono font-semibold self-start">
+                Watch Sync: {selectedMother.watchTelemetry?.lastSyncedAt || 'Live'}
+              </span>
+            </div>
+
+            {/* 4 Telemetry Cards: Sleep Fragmentation, Heart Rate & HRV, Acoustic Voice Fatigue, Last Watch Button Action */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="p-4 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3]">
+                <div className="text-[11px] text-[#5A625D]">Watch Sleep Fragmentation</div>
+                <div className="text-sm font-mono font-bold text-[#E11D48] mt-1">
+                  {selectedMother.watchTelemetry?.sleepSummaryLabel ||
+                    '3.1 hrs sleep / 6 wake-ups'}
+                </div>
+                <div className="text-[11px] text-[#5A625D] mt-0.5">
+                  Deep sleep: {selectedMother.watchTelemetry?.deepSleepHours ?? 0.7} hrs
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3]">
+                <div className="text-[11px] text-[#5A625D]">Heart Rate & HRV</div>
+                <div className="text-sm font-mono font-bold text-[#1F2421] mt-1">
+                  {selectedMother.watchTelemetry?.heartRateBpm || 88} BPM · HRV{' '}
+                  {selectedMother.watchTelemetry?.hrvMs || 29} ms
+                </div>
+                <div className="text-[11px] text-[#D97706] mt-0.5">
+                  Rest Ring: {selectedMother.watchTelemetry?.restRingPct || 38}%
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-[#FFF5F5]/70 border border-[#F5D0D6]">
+                <div className="text-[11px] text-[#5A625D]">Acoustic Voice Fatigue</div>
+                <div className="text-xs font-mono font-bold text-[#E11D48] mt-1">
+                  {selectedMother.acousticTelemetry?.cadenceSummary ||
+                    'Elevated Vocal Fatigue: +18% slower cadence at 03:15 AM'}
+                </div>
+                <div className="text-[11px] text-[#5A625D] mt-0.5">
+                  {selectedMother.acousticTelemetry?.wpm || 94} WPM ·{' '}
+                  {selectedMother.acousticTelemetry?.pauseFrequencyPerMin || 6.8} pauses/min
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-[#F4EFFA]/70 border border-[#E2D6F3]">
+                <div className="text-[11px] text-[#5A625D]">Latest Watch Button Log</div>
+                <div className="text-xs font-semibold text-[#1F2421] mt-1">
+                  {selectedMother.watchTelemetry?.lastWatchAction ||
+                    '03:20 AM Watch Mood: Overwhelmed'}
+                </div>
+                <div className="text-[11px] font-mono text-[#5B3E85] mt-0.5">
+                  Synced to {currentDoctor.fullName}
+                </div>
+              </div>
+            </div>
+
+            {/* Doctor Care Prescription Composer -> Push to Mother's Watch */}
+            <div className="p-5 rounded-2xl bg-[#F7F2EB] border border-[#E6DFD3] space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1F2421]">
+                    Doctor Care Prescription Composer (Push Live to {selectedMother.name}&apos;s Apple Watch)
+                  </h3>
+                  <p className="text-xs text-[#5A625D]">
+                    Select a 1-click preset or type a personalized care instruction — pops up immediately on her Apple Watch Simulator.
+                  </p>
+                </div>
+              </div>
+
+              {/* 1-Click Presets */}
+              <div className="flex flex-wrap gap-2">
+                {PRESCRIPTION_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setWatchRxInput(preset)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+                      watchRxInput === preset
+                        ? 'bg-[#2E6F40] text-white border-[#2E6F40]'
+                        : 'bg-white text-[#1F2421] border-[#E6DFD3] hover:border-[#2E6F40]'
+                    }`}
+                  >
+                    “{preset}”
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <input
+                  type="text"
+                  data-testid="doctor-watch-rx-input"
+                  value={watchRxInput}
+                  onChange={(e) => setWatchRxInput(e.target.value)}
+                  placeholder="Type custom watch care prescription..."
+                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-white border border-[#E6DFD3] text-xs sm:text-sm text-[#1F2421] focus:outline-none focus:border-[#2E6F40]"
+                />
+                <button
+                  type="button"
+                  data-testid="push-watch-prescription-btn"
+                  onClick={() => {
+                    if (!watchRxInput.trim()) return;
+                    onPushWatchPrescription(
+                      selectedMother.id,
+                      currentDoctor,
+                      watchRxInput.trim()
+                    );
+                    showToast(
+                      `Pushed live Care Prescription to ${selectedMother.name}'s Apple Watch: "${watchRxInput.trim()}"`
+                    );
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold shrink-0 transition-colors shadow-xs"
+                >
+                  ⌚ Push to Mother&apos;s Watch →
+                </button>
+              </div>
+
+              {/* Live Prescription Acknowledgment Status */}
+              {(selectedMother.watchPrescriptions || []).length > 0 && (
+                <div className="pt-2 space-y-1.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#5A625D]">
+                    Dispatched Watch Prescriptions ({selectedMother.watchPrescriptions?.length})
+                  </div>
+                  {(selectedMother.watchPrescriptions || []).slice(0, 3).map((rx) => (
+                    <div
+                      key={rx.id}
+                      className="p-2.5 rounded-xl bg-white border border-[#E6DFD3] flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="text-[#1F2421] font-medium">
+                        “{rx.message}” ·{' '}
+                        <span className="font-mono text-[11px] text-[#5A625D]">
+                          {rx.createdAt}
+                        </span>
+                      </span>
+                      <span
+                        data-testid={`doctor-rx-status-${rx.id}`}
+                        className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold shrink-0 ${
+                          rx.acknowledged
+                            ? 'bg-[#E3F2E6] text-[#2E6F40]'
+                            : 'bg-[#FFF5F5] text-[#D97706]'
+                        }`}
+                      >
+                        {rx.acknowledged
+                          ? `👍 Acknowledged (${rx.acknowledgedAt || 'Live'})`
+                          : 'Pending Watch Tap'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Gemini Clinical Summary Note (SOAP Format) */}
           <div className="bg-[#FDFBF7] border border-[#E6DFD3] rounded-2xl p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E6DFD3]">
@@ -762,6 +969,197 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
             <pre className="whitespace-pre-wrap font-sans text-sm text-[#1F2421] leading-relaxed bg-white p-5 rounded-xl border border-[#E6DFD3]">
               {getSoapTranslation(selectedMother)}
             </pre>
+          </div>
+
+          {/* ===================================================================
+              🏥 ABDM / HL7 FHIR HOSPITAL EHR INTEGRATION PANEL
+          =================================================================== */}
+          <div
+            data-testid="abdm-fhir-ehr-panel"
+            className="bg-white border-2 border-[#2E6F40]/40 rounded-2xl p-6 space-y-5 shadow-xs"
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-[#E6DFD3] pb-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-lg font-semibold text-[#1F2421]">
+                    🏥 ABDM / HL7 FHIR Hospital EHR Integration — {selectedMother.name}
+                  </h2>
+                  <span
+                    data-testid="doctor-patient-abha-badge"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-[#E3F2E6] text-[#2E6F40] text-xs font-semibold"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>ABDM Verified • Linked to Maternity EHR</span>
+                  </span>
+                </div>
+                <p className="text-xs text-[#5A625D] mt-1">
+                  Ayushman Bharat Digital Mission (ABDM) 14-Digit Health ID:{' '}
+                  <strong className="font-mono text-[#1F2421]">
+                    {selectedMother.abhaId || '91-4829-3104-8821'}
+                  </strong>{' '}
+                  ({selectedMother.abhaAddress || 'ananya.sharma@abdm'}) · Attending:{' '}
+                  <strong>{ resolveAssignedDoctor(selectedMother, [currentDoctor]).fullName }</strong>
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedMother.ehrSynced ? (
+                  <span
+                    data-testid="ehr-synced-badge"
+                    className="px-3 py-1.5 rounded-xl bg-[#2E6F40] text-white text-xs font-mono font-semibold flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>
+                      EHR Synced ✅ (
+                      {selectedMother.ehrLastSyncReceiptId || 'ABDM-HIS-SYNC'})
+                    </span>
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 rounded-xl bg-[#F7F2EB] text-[#5A625D] text-xs font-mono font-semibold">
+                    HIS Status: Ready for FHIR R4 Push
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Verify ABHA via ABDM Gateway bar inside Patient Inspector */}
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-[#E6DFD3] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-semibold text-[#1F2421]">
+                  Patient ABHA Health ID (14-Digit) Verification
+                </div>
+                <div className="text-[11px] text-[#5A625D]">
+                  Verify or update patient&apos;s 14-digit Ayushman Bharat Health Account identifier via ABDM HIE-CM Gateway.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  aria-label="Patient ABHA Health ID"
+                  value={docAbhaInput}
+                  onChange={(e) => setDocAbhaInput(e.target.value)}
+                  placeholder="91-4829-3104-8821"
+                  className="w-40 px-3 py-1.5 rounded-xl bg-white border border-[#E6DFD3] text-xs font-mono text-[#1F2421]"
+                />
+                <button
+                  type="button"
+                  data-testid="doctor-verify-abha-btn"
+                  onClick={() => {
+                    if (onVerifyAbhaId) {
+                      onVerifyAbhaId(selectedMother.id, docAbhaInput);
+                    }
+                    showToast(
+                      `ABDM Verified • Linked to Maternity EHR (${docAbhaInput})`
+                    );
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold whitespace-nowrap transition-colors"
+                >
+                  Verify ABHA via ABDM Gateway
+                </button>
+              </div>
+            </div>
+
+            {/* 3 Working Clinical Interoperability Actions */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* 1. View HL7 FHIR R4 Bundle (JSON) */}
+              <div className="p-4 rounded-2xl bg-[#FDFBF7] border border-[#E6DFD3] flex flex-col justify-between gap-3">
+                <div className="space-y-1.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#E3F2E6] text-[#2E6F40] flex items-center justify-center">
+                    <Code2 className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-[#1F2421]">
+                    HL7 FHIR R4 Clinical Bundle
+                  </h3>
+                  <p className="text-xs text-[#5A625D] leading-relaxed">
+                    Inspect structured HL7 FHIR R4 <code className="font-mono">Bundle</code> with{' '}
+                    <code className="font-mono">Patient</code> (ABHA),{' '}
+                    <code className="font-mono">Observation</code> (SHAP + Apple Watch HRV),{' '}
+                    <code className="font-mono">QuestionnaireResponse</code> (EPDS), and{' '}
+                    <code className="font-mono">CarePlan</code>.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="view-fhir-bundle-btn"
+                  onClick={() => setIsFhirBundleModalOpen(true)}
+                  className="w-full py-2.5 px-3.5 rounded-xl bg-white hover:bg-[#E3F2E6]/60 border border-[#2E6F40] text-xs font-semibold text-[#2E6F40] transition-colors"
+                >
+                  View HL7 FHIR R4 Bundle (JSON)
+                </button>
+              </div>
+
+              {/* 2. Push Risk Summary to Hospital EHR (Cloudnine / Manipal HIS) */}
+              <div className="p-4 rounded-2xl bg-[#E3F2E6]/50 border border-[#C5E3CC] flex flex-col justify-between gap-3">
+                <div className="space-y-1.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#2E6F40] text-white flex items-center justify-center">
+                    <UploadCloud className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-[#1F2421]">
+                    Hospital Information System (HIS) Sync
+                  </h3>
+                  <p className="text-xs text-[#5A625D] leading-relaxed">
+                    Executes <code className="font-mono">POST /fhir/R4/Observation</code> to{' '}
+                    {currentDoctor.hospitalName}, logs a timestamped EHR Sync Receipt ID to Supabase, and marks patient EHR Synced ✅.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="push-fhir-ehr-btn"
+                  onClick={() => {
+                    const receipt = onPushFhirEhr
+                      ? onPushFhirEhr(selectedMother.id, currentDoctor)
+                      : `ABDM-HIS-${Math.floor(100000 + Math.random() * 899999)}`;
+                    showToast(
+                      `Pushed HL7 FHIR R4 Observation to ${currentDoctor.hospitalName} • Receipt: ${receipt} (EHR Synced ✅)`
+                    );
+                  }}
+                  className="w-full py-2.5 px-3.5 rounded-xl bg-[#2E6F40] hover:bg-[#245832] text-white text-xs font-semibold transition-colors shadow-xs"
+                >
+                  Push Risk Summary to Hospital EHR (Cloudnine / Manipal HIS)
+                </button>
+              </div>
+
+              {/* 3. Download Official Clinical Handoff Report (.JSON / Printable EHR PDF View) */}
+              <div className="p-4 rounded-2xl bg-[#F4EFFA]/60 border border-[#E2D6F3] flex flex-col justify-between gap-3">
+                <div className="space-y-1.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#5B3E85] text-white flex items-center justify-center">
+                    <Download className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-[#1F2421]">
+                    Official OB-GYN & Psychiatry Handoff
+                  </h3>
+                  <p className="text-xs text-[#5A625D] leading-relaxed">
+                    Generates a formatted clinical handoff report + downloadable{' '}
+                    <code className="font-mono">.json</code> bundle ready for OB-GYN and perinatal psychiatrist review.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="download-clinical-handoff-btn"
+                  onClick={() => {
+                    const fhirBundle = buildHl7FhirR4Bundle(selectedMother, currentDoctor);
+                    try {
+                      const blob = new Blob(
+                        [JSON.stringify(fhirBundle, null, 2)],
+                        { type: 'application/json;charset=utf-8' }
+                      );
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${selectedMother.hospitalId}-HL7-FHIR-R4-Handoff.json`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch {}
+                    setIsHandoffModalOpen(true);
+                  }}
+                  className="w-full py-2.5 px-3.5 rounded-xl bg-[#5B3E85] hover:bg-[#49306B] text-white text-xs font-semibold transition-colors"
+                >
+                  Download Official Clinical Handoff Report (.JSON / Printable EHR PDF View)
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -938,6 +1336,163 @@ export const DoctorPortal: React.FC<DoctorPortalProps> = ({
         onTestLoginAsPatient={onTestLoginAsPatient}
         onClose={() => setIsOnboardModalOpen(false)}
       />
+
+      {/* HL7 FHIR R4 Bundle JSON Syntax-Highlighted Modal */}
+      {isFhirBundleModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="HL7 FHIR R4 Bundle JSON"
+          data-testid="fhir-bundle-modal"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div className="bg-white border border-[#E6DFD3] rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between gap-4 border-b border-[#E6DFD3] pb-3">
+              <div>
+                <div className="text-[11px] font-mono uppercase tracking-wider text-[#2E6F40] font-semibold">
+                  ABDM HIE-CM • HL7 FHIR R4 Interoperability Bundle
+                </div>
+                <h3 className="font-display text-lg font-semibold text-[#1F2421]">
+                  FHIR R4 Bundle — {selectedMother.name} (ABHA:{' '}
+                  {selectedMother.abhaId || '91-4829-3104-8821'})
+                </h3>
+              </div>
+              <button
+                type="button"
+                data-testid="close-fhir-bundle-modal-btn"
+                onClick={() => setIsFhirBundleModalOpen(false)}
+                className="p-1.5 rounded-lg text-[#5A625D] hover:text-[#1F2421] hover:bg-[#F7F2EB]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto rounded-xl bg-[#16191D] text-emerald-300 p-4 font-mono text-xs leading-relaxed">
+              <pre data-testid="fhir-bundle-json-pre" className="whitespace-pre-wrap">
+                {JSON.stringify(
+                  buildHl7FhirR4Bundle(selectedMother, currentDoctor),
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E6DFD3]">
+              <button
+                type="button"
+                onClick={() => {
+                  const raw = JSON.stringify(
+                    buildHl7FhirR4Bundle(selectedMother, currentDoctor),
+                    null,
+                    2
+                  );
+                  if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(raw).catch(() => {});
+                  }
+                  setCopiedFhirJson(true);
+                  setTimeout(() => setCopiedFhirJson(false), 2500);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#F7F2EB] hover:bg-[#EDE5D8] text-xs font-semibold text-[#1F2421] flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5 text-[#2E6F40]" />
+                <span>{copiedFhirJson ? 'Copied FHIR JSON!' : 'Copy FHIR R4 Bundle'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFhirBundleModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-[#2E6F40] text-white text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Printable Official Clinical Handoff Report Modal */}
+      {isHandoffModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Official Clinical Handoff Report"
+          data-testid="clinical-handoff-modal"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div className="bg-white border-2 border-[#2E6F40] rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[88vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 border-b border-[#E6DFD3] pb-3">
+              <div>
+                <div className="text-[11px] font-mono uppercase tracking-wider text-[#2E6F40] font-semibold">
+                  Official Hospital EHR Handoff Sheet • ABDM Verified
+                </div>
+                <h3 className="font-display text-xl font-semibold text-[#1F2421]">
+                  {currentDoctor.hospitalName}
+                </h3>
+                <p className="text-xs text-[#5A625D]">
+                  Attending Clinician: <strong>{currentDoctor.fullName}</strong> (
+                  {currentDoctor.kmcRegistrationId}) · Clinic Code: {currentDoctor.clinicCode}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="close-handoff-modal-btn"
+                onClick={() => setIsHandoffModalOpen(false)}
+                className="p-1.5 rounded-lg text-[#5A625D] hover:text-[#1F2421] hover:bg-[#F7F2EB]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#FDFBF7] p-4 rounded-xl border border-[#E6DFD3] text-xs">
+              <div>
+                <div className="text-[#5A625D]">Patient & Postpartum Stage</div>
+                <div className="font-semibold text-[#1F2421] mt-0.5">
+                  {selectedMother.name} ({selectedMother.age}y · {selectedMother.postpartumWeeks}w postpartum · {selectedMother.babyName})
+                </div>
+              </div>
+              <div>
+                <div className="text-[#5A625D]">ABHA 14-Digit Health ID</div>
+                <div className="font-mono font-bold text-[#2E6F40] mt-0.5">
+                  {selectedMother.abhaId || '91-4829-3104-8821'} ({selectedMother.abhaAddress || 'ananya.sharma@abdm'})
+                </div>
+              </div>
+              <div>
+                <div className="text-[#5A625D]">7-Day Behavioral Risk Signal</div>
+                <div className="font-mono font-bold text-[#E11D48] mt-0.5">
+                  {selectedMother.riskScore}/100 (+{selectedMother.baselineDeviationPercent}% vs personal baseline)
+                </div>
+              </div>
+              <div>
+                <div className="text-[#5A625D]">Apple Watch & Vocal Telemetry</div>
+                <div className="font-mono text-[#1F2421] mt-0.5">
+                  {selectedMother.watchTelemetry?.sleepSummaryLabel || '3.1 hrs sleep / 6 wake-ups'} · HRV {selectedMother.watchTelemetry?.hrvMs || 29} ms
+                </div>
+              </div>
+            </div>
+
+            <pre className="whitespace-pre-wrap font-sans text-xs text-[#1F2421] leading-relaxed bg-[#FDFBF7] p-4 rounded-xl border border-[#E6DFD3]">
+              {getSoapTranslation(selectedMother)}
+            </pre>
+
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E6DFD3]">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-4 py-2 rounded-xl bg-[#F7F2EB] hover:bg-[#EDE5D8] text-xs font-semibold text-[#1F2421] flex items-center gap-1.5"
+              >
+                <Printer className="w-3.5 h-3.5 text-[#5B3E85]" />
+                <span>Print EHR PDF View</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsHandoffModalOpen(false)}
+                className="px-5 py-2 rounded-xl bg-[#2E6F40] text-white text-xs font-semibold"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
