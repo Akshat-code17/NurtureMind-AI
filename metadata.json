@@ -1,0 +1,8 @@
+{
+  "name": "NurtureMind AI",
+  "description": "Early, explainable risk signals from consented newborn-care behaviour — so support can reach mothers sooner.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
